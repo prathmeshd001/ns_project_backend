@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+face_recognition
+Pillow
+cryptography
+numpy
+
