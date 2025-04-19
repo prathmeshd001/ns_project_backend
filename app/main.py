@@ -29,7 +29,8 @@ async def register_user(
         
         # Simulate TTP key pair generation.
         private_pem, public_pem = utils.simulate_ttp_generate_ibe_key(canonical_hash)
-        
+        print(f"Private PEM: {private_pem}")
+        print(f"Public PEM: {public_pem}")
         # Encrypt the private key using the user's password.
         encrypted_private, encryption_salt = utils.encrypt_private_key(private_pem, password)
         

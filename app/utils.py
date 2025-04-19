@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 # ------------------------------------
 # IMAGE PROCESSING & EMBEDDING FUNCTIONS
 # ------------------------------------
-
+#
 def load_image(file_bytes: bytes) -> np.ndarray:
     """
     Load an image from bytes and convert it to a numpy array.
