@@ -1,6 +1,5 @@
 dlib-bin==19.24.6                 # pre-built manylinux2014 wheel for Python 3.10 :contentReference[oaicite:6]{index=6}
 face-recognition==1.3.0           # latest stable with wheels :contentReference[oaicite:7]{index=7}
-face-recognition-models==0.1.3 
 fastapi
 uvicorn
 python-dotenv
