@@ -1,12 +1,31 @@
+# app/main.py
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse
-from app import utils
+import sqlite3, numpy as np
+from fastapi.middleware.cors import CORSMiddleware
+
+from app import utils, db
 
 app = FastAPI(title="Secure DH & IBE Demo Backend")
 
-# In-memory datastore for demonstration.
-users_table = {}  # General user data, keyed by email.
-ibe_table = {}    # IBE sensitive data, keyed by email.
+# Replace these with your actual frontend URLs
+origins = [
+    "*"
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,           # or ["*"] during development
+    allow_credentials=True,          # if you use cookies/auth headers
+    allow_methods=["*"],             # GET, POST, PUT, etc.
+    allow_headers=["*"],             # Authorization, Content-Type, etc.
+)
+
+@app.on_event("startup")
+async def init_db():
+    conn = db.create_connection()
+    db.create_tables(conn)
+    conn.close()
 
 @app.post("/register")
 async def register_user(
@@ -14,81 +33,65 @@ async def register_user(
     password: str = Form(...),
     image: UploadFile = File(...)
 ):
+    conn = db.create_connection()
     try:
-        #logging
-        print(f'{email} - {password}');
-        # Process the image.
-        file_bytes = await image.read()
-        img_array = utils.load_image(file_bytes)
-        base_embedding = utils.get_embedding(img_array)
-        canonical_hash = utils.calculate_hash(base_embedding)
-        
-        # Check if the email is already registered.
-        if email in users_table:
-            raise HTTPException(status_code=400, detail="User with this email already registered.")
-        
-        # Simulate TTP key pair generation.
-        private_pem, public_pem = utils.simulate_ttp_generate_ibe_key(canonical_hash)
-        print(f"Private PEM: {private_pem}")
-        print(f"Public PEM: {public_pem}")
-        # Encrypt the private key using the user's password.
-        encrypted_private, encryption_salt = utils.encrypt_private_key(private_pem, password)
-        
-        # Store general user info.
-        users_table[email] = {
-            "email": email,
-            # Additional non-sensitive user data can be stored here.
-        }
-        
-        # Store sensitive IBE data.
-        ibe_table[email] = {
-            "embedding": base_embedding,          # For internal verification.
-            "encrypted_private_key": encrypted_private.hex(),  # Stored as hex string.
-            "encryption_salt": encryption_salt.hex(),
-            "public_key": public_pem
-        }
-        
-        # Return the public key and encryption details to the client.
-        return JSONResponse(content={
+        # 1. Face embedding
+        img = utils.load_image(await image.read())
+        emb = utils.get_embedding(img)
+        canon_hash = utils.calculate_hash(emb)
+
+        # 2. IBE key pair
+        priv_pem, pub_pem = utils.simulate_ttp_generate_ibe_key(canon_hash)
+
+        # 3. Encrypt private key for client
+        encrypted_priv, salt = utils.encrypt_private_key(priv_pem, password)
+        encrypted_hex = encrypted_priv.hex()
+        salt_hex = salt.hex()
+
+        # 4. Store user & IBE data
+        db.add_user(conn, email)
+        db.add_ibe_data(conn, email, emb.tobytes(), pub_pem, encrypted_hex, salt_hex)
+        conn.commit()
+
+        return JSONResponse({
             "message": "Registration successful.",
-            "public_key": public_pem,
-            "encrypted_private_key": encrypted_private.hex(),
-            "encryption_salt": encryption_salt.hex()
+            "public_key": pub_pem,
+            "encrypted_private_key": encrypted_hex,
+            "encryption_salt": salt_hex
         })
+
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        raise HTTPException(400, "User already registered")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        conn.rollback()
+        raise HTTPException(400, str(e))
+    finally:
+        conn.close()
 
 @app.post("/verify")
 async def verify_user(
     email: str = Form(...),
     image: UploadFile = File(...)
 ):
+    conn = db.create_connection()
     try:
-        # Check if the email is registered.
-        if email not in ibe_table:
-            raise HTTPException(status_code=400, detail="No registration found for the provided email.")
-        
-        stored_data = ibe_table[email]
-        stored_embedding = stored_data["embedding"]
-        
-        # Process the new image.
-        file_bytes = await image.read()
-        img_array = utils.load_image(file_bytes)
-        new_embedding = utils.get_embedding(img_array)
-        
-        # Verify the face embedding against the stored embedding.
-        if utils.is_matching(new_embedding, stored_embedding):
-            return JSONResponse(content={
-                "message": "Image verified successfully.",
-                "public_key": stored_data["public_key"]
+        data = db.get_ibe_data(conn, email)
+        if not data:
+            raise HTTPException(400, "Email not registered")
+
+        emb_stored = np.frombuffer(data['embedding'], dtype=np.float64)
+        emb_new    = utils.get_embedding(utils.load_image(await image.read()))
+
+        if utils.is_matching(emb_new, emb_stored):
+            return JSONResponse({
+                "message": "Image verified",
+                "public_key": data['public_key']
             })
         else:
-            raise HTTPException(status_code=400, detail="Face does not match the registered image.")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(400, "Face mismatch")
 
-@app.post("/dh_exchange")
-async def dh_exchange():
-    # Dummy endpoint for Diffie–Hellman exchange.
-    shared_secret = "dummy_shared_secret_value"
-    return JSONResponse(content={"shared_secret": shared_secret})
+    except Exception as e:
+        raise HTTPException(400, str(e))
+    finally:
+        conn.close()

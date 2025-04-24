@@ -1,7 +1,9 @@
 fastapi
 uvicorn
+python-dotenv
 face_recognition
 Pillow
 cryptography
 numpy
-
+python-multipart
+sqlitecloud
