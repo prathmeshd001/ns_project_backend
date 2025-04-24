@@ -7,3 +7,4 @@ cryptography
 numpy
 python-multipart
 sqlitecloud
+dlib-bin==19.24.6
