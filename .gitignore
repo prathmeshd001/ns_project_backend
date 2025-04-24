@@ -18,3 +18,6 @@ database.db
 .idea/
 .DS_Store
 thumbs.db
+
+*/__pycache__/
+
